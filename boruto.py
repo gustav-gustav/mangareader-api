@@ -39,11 +39,14 @@ class Scraper:
     def get_last_chapter(self):
         paths = glob.glob(os.path.join(self.base_path, '*/'))
         chapter_list = []
-        for chapter in paths:
-            chapter_dir = chapter.split(os.path.sep)[-2]
-            chapter_number = chapter_dir.strip('Chapter ')
-            chapter_list.append(int(chapter_number))
-        return max(chapter_list)
+        if paths:
+            for chapter in paths:
+                chapter_dir = chapter.split(os.path.sep)[-2]
+                chapter_number = chapter_dir.strip('Chapter ')
+                chapter_list.append(int(chapter_number))
+            return max(chapter_list)
+        else:
+            return 1
 
     def get_last_page(self):
         path = os.path.join(
@@ -60,13 +63,20 @@ class Scraper:
         else:
             return 1
 
+    def reset(self):
+        self.current_chapter += 1
+        self.current_page = 1
+        self.mkdir()
+
     def check(self):
         try:
             with requests.get(self.current_endpoint) as response:
                 if response.ok:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     pages_in_chapter = soup.findAll('div', {'id': 'selectpage'})[0].text
-                    self.all_episodes_in_chapter = int(pages_in_chapter[(len(pages_in_chapter)-2):])
+                    self.total_pages = int(pages_in_chapter[(len(pages_in_chapter)-2):])
+                    if self.current_page == self.total_pages:
+                        self.reset()
                 else:
                     response.raise_for_status()
         except IndexError:
@@ -94,10 +104,8 @@ class Scraper:
                                         print(f'Downloading {photo} at {self.directory}')
                                     shutil.copyfileobj(response.raw, out_file)
 
-                        if self.current_page == self.all_episodes_in_chapter:
-                            self.current_chapter += 1
-                            self.current_page = 1
-                            self.mkdir()
+                        if self.current_page == self.total_pages:
+                            self.reset()
                         else:
                             self.current_page += 1
 
