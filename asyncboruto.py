@@ -55,8 +55,7 @@ class Scraper:
         Increments current chapter after every iteration.'''
         while True:
             # try:
-            semaphore = asyncio.Semaphore(60)
-            async with semaphore:
+            async with asyncio.Semaphore(60):
                 start = perf_counter()
                 all_endpoints = (f'{self.current_chapter_endpoint}{page}' for page in range(
                     self.current_page, self.total_pages + 1))
