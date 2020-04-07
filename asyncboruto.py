@@ -50,6 +50,9 @@ class Scraper:
 
 
     async def main(self):
+        '''Main loop. Generates endpoints based on
+        an initial page and the total pages for that chapter.
+        Increments current chapter after every iteration.'''
         while True:
             # try:
             semaphore = asyncio.Semaphore(60)
@@ -74,6 +77,8 @@ class Scraper:
             #     break
 
     async def fetch(self, session, url):
+        '''Makes async http requests and parses it with bs4
+        Download's the image that the first endpoint matched'''
         try:
             async with session.get(url) as response:
                 if self.debug:
@@ -131,11 +136,15 @@ class Scraper:
             return 1
 
     async def reset(self):
+        'resets pages to 1 and increments chapter by 1'
         self.current_chapter += 1
         self.current_page = 1
         await self.mkdir()
 
     async def mkdir(self):
+        '''Checks if there is a directory for the current chapter.
+        If not, creates it.
+        Finally calls check'''
         self.directory = os.path.join(
             self.base_path, f'Chapter {self.current_chapter}')
 
@@ -146,6 +155,8 @@ class Scraper:
         await self.check()
 
     async def check(self):
+        '''Updates the total_pages variable given the current chapter.
+        If the current page == total_pages: increments current chapter and calls itself.'''
         try:
             async with ClientSession(headers=self.headers) as session:
                 async with session.get(f"{self.current_chapter_endpoint}{self.last_page}") as response:
