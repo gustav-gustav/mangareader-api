@@ -58,8 +58,8 @@ class Scraper:
 
     async def fetch(self, session, url):
         async with session.get(url) as response:
-            print(
-                f"{strftime('[%d/%m/%Y %H:%M:%S]')} {response.status}@{response.url.path!r}")
+            if self.debug:
+                print(f"{strftime('[%d/%m/%Y %H:%M:%S]')} {response.status}@{response.url.path!r}")
             page_number = os.path.splitext(url)[0].split('/')[-1]
             html = await response.text()
             soup = BeautifulSoup(html, 'html.parser')
@@ -70,7 +70,8 @@ class Scraper:
                 photo = f'Boruto.ch{self.current_chapter}.p{page_number.zfill(3)}.jpg'
                 photo_path = os.path.join(
                     self.base_path, self.directory, photo)
-                # print(f'Creating {photo_path}')
+                if not self.debug:
+                    print(f'Creating {photo_path}')
                 async with aiofiles.open(photo_path, 'wb') as aiof:
                     await aiof.write(await response.read())
                     await aiof.close()
