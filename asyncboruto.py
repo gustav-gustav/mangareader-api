@@ -1,9 +1,7 @@
 from decorators import ResponseTimer
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-
-from aiohttp import ClientSession
-import asyncio
-import aiofiles
+from time import strftime
 import argparse
 import requests
 import shutil
@@ -11,8 +9,13 @@ import glob
 import os
 import sys
 
+from aiohttp import ClientSession
+import asyncio
+import aiofiles
+
 
 class Scraper:
+    'Async implementation for downloading multiple images concurrently'
     def __init__(self):
         self.base_url = 'https://www.mangareader.net/boruto-naruto-next-generations/'
         self.base_path = os.path.join(os.getcwd(), 'Boruto')
@@ -26,33 +29,71 @@ class Scraper:
 
         self.debug = args.debug
         self.write_to_file = args.download
-        self.current_chapter = self.get_last_chapter()
-        self.current_page = self.get_last_page()
+        self.current_chapter = self.last_chapter
+        self.current_page = self.last_page
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
         if self.debug:
             requests.get = ResponseTimer(requests.get)
         self.mkdir()
-        self.main()
+        # creating asyncio event loop
+        self.loop = asyncio.get_event_loop()
+        self.loop.run_until_complete(self.main())
 
-    def mkdir(self):
-        self.directory = os.path.join(
-            self.base_path, f'Chapter {self.current_chapter}')
+    async def main(self):
+        while True:
+            try:
+                all_endpoints = (f'{self.current_chapter_endpoint}{page}' for page in range(
+                    self.current_page, self.total_pages + 1))
+                tasks = []
+                async with ClientSession(headers=self.headers) as session:
+                    for endpoint in all_endpoints:
+                        tasks.append(self.fetch(session, endpoint))
+                    await asyncio.gather(*tasks)
 
-        if not os.path.isdir(self.directory):
-            if not self.debug:
-                print(f"Creating directory {self.directory}")
-            os.mkdir(self.directory)
-        self.check()
+                self.reset()
+            except Exception as e:
+                print(e)
+                break
 
-    def get_last_chapter(self):
+    async def fetch(self, session, url):
+        async with session.get(url) as response:
+            print(
+                f"{strftime('[%d/%m/%Y %H:%M:%S]')} {response.status}@{response.url.path!r}")
+            page_number = os.path.splitext(url)[0].split('/')[-1]
+            html = await response.text()
+            soup = BeautifulSoup(html, 'html.parser')
+            img_url = soup.findAll("div", attrs={"id": "imgholder"})[
+                0].img["src"]
+            async with session.get(img_url) as response:
+                print(f"{strftime('[%d/%m/%Y %H:%M:%S]')} {response.status}@{response.url.path!r}")
+                photo = f'Boruto.ch{self.current_chapter}.p{page_number.zfill(3)}.jpg'
+                photo_path = os.path.join(
+                    self.base_path, self.directory, photo)
+                # print(f'Creating {photo_path}')
+                async with aiofiles.open(photo_path, 'wb') as aiof:
+                    await aiof.write(await response.read())
+                    await aiof.close()
+
+    @property
+    def current_chapter_endpoint(self):
+        return f'{self.base_url}{self.current_chapter}/'
+
+    @property
+    def last_chapter(self):
         paths = glob.glob(os.path.join(self.base_path, '*/'))
         chapter_list = []
-        for chapter in paths:
-            chapter_dir = chapter.split(os.path.sep)[-2]
-            chapter_number = chapter_dir.strip('Chapter ')
-            chapter_list.append(int(chapter_number))
-        return max(chapter_list)
+        if paths:
+            for chapter in paths:
+                chapter_dir = chapter.split(os.path.sep)[-2]
+                chapter_number = chapter_dir.strip('Chapter ')
+                chapter_list.append(int(chapter_number))
+            return max(chapter_list)
+        else:
+            return 1
 
-    def get_last_page(self):
+    @property
+    def last_page(self):
         path = os.path.join(
             self.base_path, f'Chapter {self.current_chapter}', "*.jpg")
         paths = glob.glob(path)
@@ -67,65 +108,37 @@ class Scraper:
         else:
             return 1
 
+    def reset(self):
+        self.current_chapter += 1
+        self.current_page = 1
+        self.mkdir()
+
+    def mkdir(self):
+        self.directory = os.path.join(
+            self.base_path, f'Chapter {self.current_chapter}')
+
+        if not os.path.isdir(self.directory):
+            if not self.debug:
+                print(f"Creating directory {self.directory}")
+            os.mkdir(self.directory)
+        self.check()
+
     def check(self):
         try:
-            with requests.get(self.current_endpoint) as response:
+            with requests.get(f"{self.current_chapter_endpoint}{self.last_page}") as response:
                 if response.ok:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     pages_in_chapter = soup.findAll(
                         'div', {'id': 'selectpage'})[0].text
-                    self.all_episodes_in_chapter = int(
+                    self.total_pages = int(
                         pages_in_chapter[(len(pages_in_chapter)-2):])
+                    if self.current_page == self.total_pages:
+                        self.reset()
                 else:
                     response.raise_for_status()
         except IndexError:
             print('No new chapters yet, check again at 20th of every month')
             sys.exit()
-
-    @property
-    def current_endpoint(self):
-        return f'{self.base_url}{self.current_chapter}/{self.current_page}'
-
-    def main(self):
-        while True:
-            try:
-                with requests.get(self.current_endpoint) as response:
-                    if response.ok:
-                        soup = BeautifulSoup(response.text, 'html.parser')
-                        image_url = soup.findAll("div", attrs={"id": "imgholder"})[
-                            0].img["src"]
-                        response = requests.get(image_url, stream=True)
-                        photo = f'Boruto.ch{self.current_chapter}.p{str(self.current_page).zfill(3)}.jpg'
-                        photo_path = os.path.join(
-                            self.base_path, self.directory, photo)
-                        if not os.path.isfile(photo_path):
-                            if self.write_to_file:
-                                with open(photo_path, 'wb') as out_file:
-                                    if not self.debug:
-                                        print(
-                                            f'Downloading {photo} at {self.directory}')
-                                    shutil.copyfileobj(response.raw, out_file)
-
-                        if self.current_page == self.all_episodes_in_chapter:
-                            self.current_chapter += 1
-                            self.current_page = 1
-                            self.mkdir()
-                        else:
-                            self.current_page += 1
-
-                    else:
-                        raise response.raise_for_status()
-
-            except KeyboardInterrupt:
-                break
-
-            except IndexError as e:
-                print(f'Last chapter released is {self.current_chapter - 1}')
-                break
-
-            except Exception as e:
-                print(e)
-                break
 
 
 if __name__ == '__main__':
