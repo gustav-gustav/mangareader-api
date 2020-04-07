@@ -31,6 +31,7 @@ class Scraper:
         self.debug = args.debug
         self.write_to_file = args.download
         self.initial = self.last_chapter
+        self.runtime_pages = 0
         self.current_chapter = self.initial
         self.current_page = self.last_page
         self.headers = {
@@ -46,7 +47,7 @@ class Scraper:
         except Exception as e:
             print(e)
         finally:
-            print(f"Total duration of requests from Chapter {self.initial} to {self.last_chapter}: {(perf_counter() - self.start):.2f} seconds")
+            print(f"Total duration of requests of {self.runtime_pages} pages from Chapter {self.initial} to {self.last_chapter}: {(perf_counter() - self.start):.2f} seconds")
 
 
     async def main(self):
@@ -55,8 +56,8 @@ class Scraper:
         Increments current chapter after every iteration.'''
         while True:
             # try:
+            start = perf_counter()
             async with asyncio.Semaphore(60):
-                start = perf_counter()
                 all_endpoints = (f'{self.current_chapter_endpoint}{page}' for page in range(
                     self.current_page, self.total_pages + 1))
                 tasks = []
@@ -68,8 +69,7 @@ class Scraper:
 
             print(f"Chapter {self.current_chapter} finished in: {(perf_counter() - start):.2f} seconds")
             if self.current_chapter % 10 == 0:
-                print(
-                    f"Total duration of requests from Chapter {self.initial} to {self.current_chapter}: {(perf_counter() - self.start):.2f} seconds")
+                print(f"Total duration of requests from Chapter {self.initial} to {self.current_chapter}: {(perf_counter() - self.start):.2f} seconds")
             await self.reset()
             # except Exception as e:
             #     print(e)
@@ -83,15 +83,15 @@ class Scraper:
                 if self.debug:
                     print(f"{strftime('[%d/%m/%Y %H:%M:%S]')} {response.status}@{response.url.path!r}")
                 page_number = os.path.splitext(url)[0].split('/')[-1]
+                chapter = os.path.splitext(url)[0].split('/')[-2]
+                directory = f"Chapter {chapter}"
                 html = await response.text()
                 soup = BeautifulSoup(html, 'html.parser')
-                img_url = soup.findAll("div", attrs={"id": "imgholder"})[
-                    0].img["src"]
+                img_url = soup.findAll("div", attrs={"id": "imgholder"})[0].img["src"]
                 async with session.get(img_url) as response:
                     print(f"{strftime('[%d/%m/%Y %H:%M:%S]')} {response.status}@{response.url.path!r}")
-                    photo = f'Boruto.ch{self.current_chapter}.p{page_number.zfill(3)}.jpg'
-                    photo_path = os.path.join(
-                        self.base_path, self.directory, photo)
+                    photo = f'Boruto.ch{chapter}.p{page_number.zfill(3)}.jpg'
+                    photo_path = os.path.join(self.base_path, directory, photo)
                     if not self.debug:
                         print(f'Creating {photo_path}')
                     async with aiofiles.open(photo_path, 'wb') as aiof:
@@ -166,6 +166,7 @@ class Scraper:
                             'div', {'id': 'selectpage'})[0].text
                         self.total_pages = int(
                             pages_in_chapter[(len(pages_in_chapter)-2):])
+                        self.runtime_pages += self.total_pages
                         if self.current_page == self.total_pages:
                             await self.reset()
                     else:
