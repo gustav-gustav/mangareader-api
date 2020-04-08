@@ -1,7 +1,9 @@
+from urllib.parse import urlparse, urlencode
 from time import strftime, perf_counter
 from decorators import ResponseTimer
-from urllib.parse import urlparse
+from collections import namedtuple
 from bs4 import BeautifulSoup
+from fuzzywuzzy import fuzz
 import argparse
 import requests
 import shutil
@@ -18,6 +20,7 @@ import aiofiles
 class Scraper:
     def __init__(self):
         '''Async scraper and parser to download manga chapters from mangareader.net'''
+        # https://mangareader.net/actions/search/?q=naruto&limit=100
         self.base_url = 'https://www.mangareader.net/naruto'
         self.base_path = os.path.join(os.getcwd(), 'Naruto')
 
@@ -28,6 +31,7 @@ class Scraper:
                             action='store_false', help='weather or not to download')
         args = parser.parse_args()
 
+        self.match('naruto')
         self.debug = args.debug
         self.write_to_file = args.download
         self.initial = self.last_chapter
@@ -67,6 +71,24 @@ class Scraper:
             return max(chapter_list)
         else:
             return 1
+
+    def match(self, string):
+        payload = urlencode({"q": string.lower(), "limit": 100})
+        with requests.get("https://mangareader.net/actions/search/?", params=payload) as response:
+            if response.ok:
+                data = response.text.split('\n')
+                Fields = namedtuple('Fields', ['Name', 'Image', 'Title', 'Creator', 'Endpoint', 'Index'])
+                match_list = []
+                for match in data:
+                    if match:
+                        fields = Fields(*match.split('|'))
+                        rating = fuzz.partial_ratio(fields.Name.lower(), string.lower())
+                        obj = {'rating': rating, 'obj': fields}
+                        match_list.append(obj)
+                best_match = max([match['rating'] for match in match_list])
+                best_tuple = [match['obj'] for match in match_list if match['rating'] == best_match]
+                print(best_tuple)
+
 
     async def main(self):
         '''
