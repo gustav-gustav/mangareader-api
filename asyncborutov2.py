@@ -1,7 +1,7 @@
+from time import strftime, perf_counter
 from decorators import ResponseTimer
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
-from time import strftime, perf_counter
 import argparse
 import requests
 import shutil
@@ -15,8 +15,9 @@ import asyncio
 import aiofiles
 
 
-class Test:
+class Scraper:
     def __init__(self):
+        '''Async scraper and parser to download manga chapters from mangareader.net'''
         self.base_url = 'https://www.mangareader.net/naruto'
         self.base_path = os.path.join(os.getcwd(), 'Naruto')
 
@@ -49,6 +50,7 @@ class Test:
                 f"Total duration of requests of {self.runtime_pages} pages from Chapter {self.initial} to {self.last_chapter}: {(perf_counter() - self.start):.2f} seconds")
     @property
     def end_chapter(self):
+        '''Makes a request to self.base_url to get the last chapter available'''
         with requests.get(self.base_url) as response:
             soup = BeautifulSoup(response.text, 'html.parser')
             last_a = soup.findAll('ul')[2].findAll('a')[0]['href']
@@ -56,6 +58,7 @@ class Test:
 
     @property
     def last_chapter(self):
+        '''Gets the last chapter created'''
         paths = glob.glob(os.path.join(self.base_path, '*/'))
         chapter_list = []
         if paths:
@@ -69,6 +72,11 @@ class Test:
 
     @property
     def last_page(self):
+        '''
+        Gets the last page downloaded in last chapter directory
+        usefull in sync code, but as images are downloaded async,
+        there is no way in telling if it downloaded all of them.
+        '''
         path = os.path.join(
             self.base_path, f'Chapter {self.current_chapter}', "*.jpg")
         paths = glob.glob(path)
@@ -84,6 +92,12 @@ class Test:
             return 1
 
     async def main(self):
+        '''
+        In the first part creates tasks from the generator, which yields an endoint in range of
+        the last chapter and the end chapter.
+        When async.gather(*fetch_tasks) runs, returns a nested list of coroutines for each chapter
+        which is called when gathering download_tasks
+        '''
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
         fetch_tasks = []
         sema_count = 10
@@ -96,6 +110,11 @@ class Test:
                 await asyncio.gather(*task)
 
     async def fetch(self, session, url):
+        '''
+        Get request @ endpoint created by the generator in self.main, parsing response.text() with BeautifulSoup
+        Gets the total_pages for that chapter.
+        Returns a list of coroutines to be run in self.main() which will async download all images for each chapter in order of chapters
+        '''
         start = perf_counter()
         async with self.sema:
             async with session.get(url) as response:
@@ -120,8 +139,11 @@ class Test:
                     response.raise_for_status()
 
     async def download(self, session, url):
-        '''Makes async http requests and parses it with bs4
-        Download's the image that the first endpoint matched'''
+        '''
+        Makes async http requests and parses it with BeautifulSoup
+        Download's the image that the first endpoint matched.
+        If request fails, retries it in the excepion catch
+        '''
         async with self.sema:
             try:
                 start = perf_counter()
@@ -160,7 +182,8 @@ class Test:
             os.mkdir(directory)
 
     def printer(self, status, url_path, start):
+        '''Wraps the async response with usefull debugging stats'''
         print(f"{strftime('[%d/%m/%Y %H:%M:%S]')} {status}@{url_path!r} finished in {(perf_counter() - start):.2f}")
 
 if __name__ == "__main__":
-    Test()
+    Scraper()
