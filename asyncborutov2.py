@@ -32,8 +32,6 @@ class Scraper:
         self.write_to_file = args.download
         self.initial = self.last_chapter
         self.runtime_pages = 0
-        self.current_chapter = self.initial
-        self.current_page = self.last_page
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
         if self.debug:
@@ -46,8 +44,8 @@ class Scraper:
         except Exception as e:
             print(e)
         finally:
-            print(
-                f"Total duration of requests of {self.runtime_pages} pages from Chapter {self.initial} to {self.last_chapter}: {(perf_counter() - self.start):.2f} seconds")
+            print(f"Total duration of requests of {self.runtime_pages} pages from Chapter {self.initial} to {self.last_chapter}: {(perf_counter() - self.start):.2f} seconds")
+
     @property
     def end_chapter(self):
         '''Makes a request to self.base_url to get the last chapter available'''
@@ -70,27 +68,6 @@ class Scraper:
         else:
             return 1
 
-    @property
-    def last_page(self):
-        '''
-        Gets the last page downloaded in last chapter directory
-        usefull in sync code, but as images are downloaded async,
-        there is no way in telling if it downloaded all of them.
-        '''
-        path = os.path.join(
-            self.base_path, f'Chapter {self.current_chapter}', "*.jpg")
-        paths = glob.glob(path)
-        image_list = []
-        if paths:
-            for image in paths:
-                image_file = image.split(os.path.sep)[-1]
-                image_name = os.path.splitext(image_file)[0]
-                image_number = int(image_name[(len(image_name) - 2):])
-                image_list.append(image_number)
-            return max(image_list)
-        else:
-            return 1
-
     async def main(self):
         '''
         In the first part creates tasks from the generator, which yields an endoint in range of
@@ -98,16 +75,20 @@ class Scraper:
         When async.gather(*fetch_tasks) runs, returns a nested list of coroutines for each chapter
         which is called when gathering download_tasks
         '''
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
-        fetch_tasks = []
-        sema_count = 10
-        self.sema = asyncio.Semaphore(sema_count)
-        async with ClientSession(headers=headers) as session:
-            for endpoint in (f"{self.base_url}/{chapter}/1" for chapter in range(self.initial, self.end_chapter + 1)):
-                fetch_tasks.append(self.fetch(session, endpoint,))
-            download_tasks = await asyncio.gather(*fetch_tasks)
-            for task in download_tasks:
-                await asyncio.gather(*task)
+        latest_chapter = self.end_chapter
+        if self.initial != latest_chapter:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
+            fetch_tasks = []
+            sema_count = 10
+            self.sema = asyncio.Semaphore(sema_count)
+            async with ClientSession(headers=headers) as session:
+                for endpoint in (f"{self.base_url}/{chapter}/1" for chapter in range(self.initial,  + 1)):
+                    fetch_tasks.append(self.fetch(session, endpoint,))
+                download_tasks = await asyncio.gather(*fetch_tasks)
+                for task in download_tasks:
+                    await asyncio.gather(*task)
+        else:
+            print('No new chapters yet, check again at 20th of every month')
 
     async def fetch(self, session, url):
         '''
@@ -126,14 +107,8 @@ class Scraper:
                     await asyncio.sleep(0.25)
                     total_pages = int(pages_in_chapter[(len(pages_in_chapter)-2):])
                     tasks = []
-                    initial = 1
-                    if chapter == self.initial:
-                        last = self.last_page
-                        if last == total_pages:
-                            tasks.append(asyncio.sleep(0))
-                    else:
-                        for endpoint in (f"{self.base_url}/{chapter}/{page}" for page in range(initial, total_pages + 1)):
-                            tasks.append(self.download(session, endpoint))
+                    for endpoint in (f"{self.base_url}/{chapter}/{page}" for page in range(1, total_pages + 1)):
+                        tasks.append(self.download(session, endpoint))
                     return tasks
                 else:
                     response.raise_for_status()
@@ -167,10 +142,10 @@ class Scraper:
                         async with aiofiles.open(photo_path, 'wb') as aiof:
                             await aiof.write(await response.read())
                             await aiof.close()
+                        self.runtime_pages += 1
             except Exception as e:
                 print(e)
                 await self.download(session, url)
-                # sys.exit()
 
     async def mkdir(self, chapter):
         '''Checks if there is a directory for the current chapter.
