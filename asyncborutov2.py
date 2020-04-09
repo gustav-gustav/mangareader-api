@@ -1,3 +1,6 @@
+'''This is as better as I could improve the task concurrency by running all initial requests concurrently
+and passing their state to the download function.
+Also added a search query for cmdline input, or a hardcoded preset, to prevent the extra sync request'''
 from urllib.parse import urlparse, urlencode
 from time import strftime, perf_counter
 from decorators import ResponseTimer
