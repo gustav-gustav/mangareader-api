@@ -20,10 +20,25 @@ import aiofiles
 class Scraper:
     def __init__(self):
         '''Async scraper and parser to download manga chapters from mangareader.net'''
+        presets = {
+            'boruto': {
+                'directory': 'Boruto: Naruto Next Generations',
+                'endpoint': '/boruto-naruto-next-generations',
+                'creator': 'KODACHI Ukyo',
+                'image_name': 'Boruto'
+            },
+            'naruto': {
+                'directory': 'Naruto',
+                'endpoint': '/naruto',
+                'creator': 'KISHIMOTO Masashi',
+                'image_name': 'Naruto'
+            }
+        }
         parser = argparse.ArgumentParser()
         group = parser.add_mutually_exclusive_group()
-        parser.add_argument('manga', action='store', help='manga to search for in mangareader.net')
-        parser.add_argument('--path', '-p', dest='path', action='store', default=os.getcwd(), help='path to save files')
+        group.add_argument('--search', '-s', action='store', help='search manga in mangareader.net')
+        group.add_argument('--preset', '-p', type=str, choices=presets)
+        parser.add_argument('--path', dest='path', action='store', default=os.getcwd(), help='path to save files')
         parser.add_argument('--debug', '-d', dest='debug', default=False,
                             action='store_true', help='display information of get requests')
         parser.add_argument('--no-download', '-n', dest='download', default=True,
@@ -35,7 +50,18 @@ class Scraper:
         if self.debug:
             requests.get = ResponseTimer(requests.get)
 
-        self.match(args.manga)
+        if args.preset:
+            preset = presets[args.preset]
+            self.directory = preset['directory']
+            self.base_endpoint = preset['endpoint']
+            self.creator = preset['creator']
+            self.image_name = preset['image_name']
+            self.base_path = os.path.join(self.path, self.directory)
+            if not os.path.isdir(self.base_path):
+                os.mkdir(self.base_path)
+        else:
+            self.match(args.search)
+
         self.base_url = 'https://www.mangareader.net'
         self.manga_url = f"{self.base_url}{self.base_endpoint}"
         self.initial = self.last_chapter
