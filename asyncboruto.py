@@ -1,3 +1,5 @@
+'''This is better, running all downloads for each chapter concurrently.
+But the way this loop works is inefficient because at every chapter it needs to run a sync request to update a variable'''
 # from decorators import ResponseTimer
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
