@@ -21,25 +21,29 @@ class Scraper:
     def __init__(self):
         '''Async scraper and parser to download manga chapters from mangareader.net'''
         # https://mangareader.net/actions/search/?q=naruto&limit=100
-        self.base_url = 'https://www.mangareader.net/naruto'
-        self.base_path = os.path.join(os.getcwd(), 'Naruto')
 
         parser = argparse.ArgumentParser()
+        parser.add_argument('manga', action='store', help='manga to search for in mangareader.net')
+        parser.add_argument('--path', '-p', dest='path', action='store', default=os.getcwd(), help='path to save files')
         parser.add_argument('--debug', '-d', dest='debug', default=False,
                             action='store_true', help='display information of get requests')
         parser.add_argument('--no-download', '-n', dest='download', default=True,
                             action='store_false', help='weather or not to download')
         args = parser.parse_args()
-
-        self.match('naruto')
-        self.debug = args.debug
         self.write_to_file = args.download
-        self.initial = self.last_chapter
-        self.runtime_pages = 0
-        self.headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
+        self.debug = args.debug
+        self.path = args.path
         if self.debug:
             requests.get = ResponseTimer(requests.get)
+
+        self.match(args.manga)
+        self.base_url = 'https://www.mangareader.net'
+        self.manga_url = f"{self.base_url}{self.base_endpoint}"
+        self.initial = self.last_chapter
+        self.runtime_pages = 0
+        self.errors = []
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
         # creating asyncio event loop
         try:
             self.start = perf_counter()
@@ -49,11 +53,18 @@ class Scraper:
             print(e)
         finally:
             print(f"Total duration of requests of {self.runtime_pages} pages from Chapter {self.initial} to {self.last_chapter}: {(perf_counter() - self.start):.2f} seconds")
+            with open(os.path.join(self.base_path, 'error.log'), 'a') as errorlog:
+                error_obj = {"missing chapters": self.errors}
+                json.dump(error_obj, errorlog)
+
+    @property
+    def manga_folders(self):
+        return glob.glob(os.path.join(self.path, "*/"))
 
     @property
     def end_chapter(self):
-        '''Makes a request to self.base_url to get the last chapter available'''
-        with requests.get(self.base_url) as response:
+        '''Makes a request to self.manga_url to get the last chapter available'''
+        with requests.get(self.manga_url) as response:
             soup = BeautifulSoup(response.text, 'html.parser')
             last_a = soup.findAll('ul')[2].findAll('a')[0]['href']
             return int(last_a.split('/')[-1])
@@ -82,12 +93,33 @@ class Scraper:
                 for match in data:
                     if match:
                         fields = Fields(*match.split('|'))
-                        rating = fuzz.partial_ratio(fields.Name.lower(), string.lower())
+                        rating = fuzz.ratio(fields.Name.lower(), string.lower())
                         obj = {'rating': rating, 'obj': fields}
                         match_list.append(obj)
                 best_match = max([match['rating'] for match in match_list])
                 best_tuple = [match['obj'] for match in match_list if match['rating'] == best_match]
-                print(best_tuple)
+                for index, tup in enumerate(best_tuple):
+                    print(f"[{index}] {tup.Name} by {tup.Creator} @ {tup.Endpoint!r}")
+                chosen = best_tuple[int(input('Choose index: '))]
+                if chosen.Name not in self.manga_folders:
+                    directory = input(f"default = {chosen.Name}\nDirectory to save to: ")
+                    if directory:
+                        self.directory = directory
+                    else:
+                        self.directory = chosen.Name
+                else:
+                    self.directory = chosen.Name
+                self.base_endpoint = chosen.Endpoint
+                self.base_path = os.path.join(self.path, self.directory)
+                if not os.path.isdir(self.base_path):
+                    os.mkdir(self.base_path)
+                self.image_name = self.char_remover(chosen.Name.split(" ")[0])
+
+    def char_remover(self, string, replacer=''):
+        bad_chars = ['\\', '/', ':', '?', '*', '"', '<', '>', '|']
+        for char in bad_chars:
+            string = string.replace(char, replacer)
+        return string
 
 
     async def main(self):
@@ -101,10 +133,10 @@ class Scraper:
         if self.initial != latest_chapter:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:74.0) Gecko/20100101 Firefox/74.0'}
             fetch_tasks = []
-            sema_count = 10
+            sema_count = 50
             self.sema = asyncio.Semaphore(sema_count)
             async with ClientSession(headers=headers) as session:
-                for endpoint in (f"{self.base_url}/{chapter}/1" for chapter in range(self.initial,  + 1)):
+                for endpoint in (f"{self.manga_url}/{chapter}/1" for chapter in range(self.initial, latest_chapter + 1)):
                     fetch_tasks.append(self.fetch(session, endpoint,))
                 download_tasks = await asyncio.gather(*fetch_tasks)
                 for task in download_tasks:
@@ -129,9 +161,14 @@ class Scraper:
                     await asyncio.sleep(0.25)
                     total_pages = int(pages_in_chapter[(len(pages_in_chapter)-2):])
                     tasks = []
-                    for endpoint in (f"{self.base_url}/{chapter}/{page}" for page in range(1, total_pages + 1)):
+                    for endpoint in (f"{self.manga_url}/{chapter}/{page}" for page in range(1, total_pages + 1)):
                         tasks.append(self.download(session, endpoint))
                     return tasks
+
+                elif response.status == 404:
+                    self.errors.append(url)
+                    return []
+
                 else:
                     response.raise_for_status()
 
@@ -159,7 +196,7 @@ class Scraper:
                     start = perf_counter()
                     async with session.get(img_url) as response:
                         self.printer(response.status, response.url.path, start)
-                        photo = f'Boruto.ch{chapter}.p{page_number.zfill(3)}.jpg'
+                        photo = f'{self.image_name}.ch{chapter}.p{page_number.zfill(3)}.jpg'
                         photo_path = os.path.join(self.base_path, directory, photo)
                         async with aiofiles.open(photo_path, 'wb') as aiof:
                             await aiof.write(await response.read())
