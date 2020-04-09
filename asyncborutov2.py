@@ -20,9 +20,8 @@ import aiofiles
 class Scraper:
     def __init__(self):
         '''Async scraper and parser to download manga chapters from mangareader.net'''
-        # https://mangareader.net/actions/search/?q=naruto&limit=100
-
         parser = argparse.ArgumentParser()
+        group = parser.add_mutually_exclusive_group()
         parser.add_argument('manga', action='store', help='manga to search for in mangareader.net')
         parser.add_argument('--path', '-p', dest='path', action='store', default=os.getcwd(), help='path to save files')
         parser.add_argument('--debug', '-d', dest='debug', default=False,
@@ -56,10 +55,6 @@ class Scraper:
             with open(os.path.join(self.base_path, 'error.log'), 'a') as errorlog:
                 error_obj = {"missing chapters": self.errors}
                 json.dump(error_obj, errorlog)
-
-    @property
-    def manga_folders(self):
-        return glob.glob(os.path.join(self.path, "*/"))
 
     @property
     def end_chapter(self):
@@ -101,7 +96,7 @@ class Scraper:
                 for index, tup in enumerate(best_tuple):
                     print(f"[{index}] {tup.Name} by {tup.Creator} @ {tup.Endpoint!r}")
                 chosen = best_tuple[int(input('Choose index: '))]
-                if chosen.Name not in self.manga_folders:
+                if chosen.Name not in glob.glob(os.path.join(self.path, "*/")):
                     directory = input(f"default = {chosen.Name}\nDirectory to save to: ")
                     if directory:
                         self.directory = directory
@@ -120,7 +115,6 @@ class Scraper:
         for char in bad_chars:
             string = string.replace(char, replacer)
         return string
-
 
     async def main(self):
         '''
