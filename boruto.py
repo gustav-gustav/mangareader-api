@@ -1,3 +1,4 @@
+'''This is very slow, waiting synchronously for every request to finish for the next one to start'''
 from decorators import ResponseTimer
 from bs4 import BeautifulSoup
 import argparse
