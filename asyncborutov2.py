@@ -4,6 +4,7 @@ Also added a search query for cmdline input, or a hardcoded preset, to prevent t
 from urllib.parse import urlparse, urlencode
 from time import strftime, perf_counter
 from decorators import ResponseTimer
+from formatters import char_remover
 from collections import namedtuple
 from bs4 import BeautifulSoup
 from fuzzywuzzy import fuzz
@@ -21,11 +22,11 @@ import aiofiles
 
 
 class Scraper:
+    '''Async scraper and parser to download manga chapters from mangareader.net'''
     def __init__(self):
-        '''Async scraper and parser to download manga chapters from mangareader.net'''
         presets = {
             'boruto': {
-                'directory': 'Boruto: Naruto Next Generations',
+                'directory': 'Boruto Naruto Next Generations',
                 'endpoint': '/boruto-naruto-next-generations',
                 'creator': 'KODACHI Ukyo',
                 'image_name': 'Boruto'
@@ -38,7 +39,7 @@ class Scraper:
             }
         }
         parser = argparse.ArgumentParser()
-        group = parser.add_mutually_exclusive_group()
+        group = parser.add_mutually_exclusive_group(required=True)
         group.add_argument('--search', '-s', action='store', help='search manga in mangareader.net')
         group.add_argument('--preset', '-p', type=str, choices=presets)
         parser.add_argument('--path', dest='path', action='store', default=os.getcwd(), help='path to save files')
@@ -124,7 +125,7 @@ class Scraper:
                 best_tuple = [match['obj'] for match in match_list if match['rating'] == best_match]
                 for index, tup in enumerate(best_tuple):
                     print(f"[{index}] {tup.Name} by {tup.Creator} @ {tup.Endpoint!r}")
-                chosen = best_tuple[int(input('Choose index: '))]
+                chosen = char_remover(best_tuple[int(input('Choose index: '))])
                 if chosen.Name not in glob.glob(os.path.join(self.path, "*/")):
                     directory = input(f"default = {chosen.Name}\nDirectory to save to: ")
                     if directory:
@@ -137,13 +138,7 @@ class Scraper:
                 self.base_path = os.path.join(self.path, self.directory)
                 if not os.path.isdir(self.base_path):
                     os.mkdir(self.base_path)
-                self.image_name = self.char_remover(chosen.Name.split(" ")[0])
-
-    def char_remover(self, string, replacer=''):
-        bad_chars = ['\\', '/', ':', '?', '*', '"', '<', '>', '|']
-        for char in bad_chars:
-            string = string.replace(char, replacer)
-        return string
+                self.image_name = char_remover(chosen.Name.split(" ")[0])
 
     async def main(self):
         '''
